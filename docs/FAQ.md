@@ -66,3 +66,27 @@ OSINT on public data is often legal, but **harassment, stalking, and unauthorize
 root@D3F4ULT:~# whoami
 D3F4UL7T
 ```
+
+
+## Discord module — how deep does it go?
+
+```bash
+# snowflake decode (created time, worker) — always offline-accurate
+python3 osintkit.py discord 803511102246789120
+
+# invite resolve + member counts + widget samples
+python3 osintkit.py discord https://discord.gg/CODE
+
+# optional bot token for /users/{id}
+export DISCORD_BOT_TOKEN=...
+python3 osintkit.py discord 803511102246789120
+
+# third-party breach/intel aggregators (keys required for full data)
+export CORD_KEY=...
+export OSINTCAT_KEY=...
+python3 osintkit.py discord 803511102246789120 --deep
+```
+
+Without keys you still get: snowflake creation time, invite/guild public metadata, widget presence samples, and CDN avatar URLs.
+With a bot token: username, global name, avatar, flags (if the bot can resolve the user).
+With cord/osintcat keys: aggregated breach / exposure records those services provide.

@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
@@ -38,6 +38,7 @@ MODULES = {
     "domain": "modules.domain_intel",
     "phone": "modules.phone_intel",
     "meta": "modules.meta_intel",
+    "discord": "modules.discord_intel",
 }
 
 
@@ -86,6 +87,8 @@ examples:
   osintkit domain example.com
   osintkit phone +14155552671
   osintkit meta ./photo.jpg
+  osintkit discord 803511102246789120
+  osintkit discord discord.gg/example --deep
         """,
     )
     p.add_argument("module", nargs="?", help="module name or 'list'")
