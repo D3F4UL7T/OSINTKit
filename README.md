@@ -19,7 +19,7 @@ Passive / public-data focused. No exploit modules.
 | `domain` | DNS + RDAP registration data |
 | `phone` | parse, region, carrier, timezone |
 | `meta` | image EXIF / GPS / file facts |
-| `discord` | snowflake decode, invite intel, widget, user API, cord/osintcat |
+| `discord` | **CordCat-first** Discord OSINT — query/lookup/guilds/server + invite/widget/snowflake |
 
 ## Install
 
@@ -49,7 +49,11 @@ python3 osintkit.py discord https://discord.gg/discord-developers
 python3 osintkit.py discord 803511102246789120 --deep
 ```
 
-Optional: `export GITHUB_TOKEN=...` for higher GitHub API rate limits.
+Optional:
+- `export GITHUB_TOKEN=...` — higher GitHub API rate limits
+- `export CORD_KEY=cc_...` — CordCat Discord deep OSINT (https://cord.cat)
+- `export DISCORD_BOT_TOKEN=...` — live Discord user profile
+- `export OSINTCAT_KEY=...` — secondary breach index
 
 ## Layout
 

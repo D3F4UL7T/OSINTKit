@@ -1,22 +1,31 @@
 """
-Discord OSINT — snowflake decode, invite resolve, user lookup, widget, multi-source.
+Discord OSINT — deep module with first-class CordCat (cord.cat) integration.
 
-Public endpoints + optional bot token / third-party keys.
+Endpoints used (CordCat API docs):
+  GET /api/v2/query/:discord_id     full profile + breach exposure + FiveM + DSA + risk
+  GET /api/v2/lookup/:name          search by username / display name
+  GET /api/v2/guilds/:id            user server list (tier gated)
+  GET /api/v2/server/:id            server deep stats
+  GET /api/v2/lookup/guild/:id      guild member profile view
+
+Plus public Discord APIs: invite resolve, widget, snowflake decode, optional bot token.
 """
 from __future__ import annotations
 
-DESCRIPTION = "Discord deep OSINT: snowflake, invite, user, guild widget, multi-source"
+DESCRIPTION = "Discord deep OSINT via CordCat + invite/widget/snowflake (cord.cat first-class)"
 
 import argparse
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-UA = "OSINTKit/1.1 (+discord-osint; D3F4UL7T)"
+UA = "OSINTKit/1.2 (+cord.cat; D3F4UL7T)"
+CORD_BASE = "https://api.cord.cat"
 DISCORD_EPOCH_MS = 1420070400000
 
 SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
@@ -26,7 +35,13 @@ INVITE_RE = re.compile(
 )
 
 
-def http_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> tuple[int, dict | list | str]:
+# ── http ────────────────────────────────────────────────────────────────
+
+def http_json(
+    url: str,
+    headers: dict | None = None,
+    timeout: float = 20.0,
+) -> tuple[int, object]:
     h = {"User-Agent": UA, "Accept": "application/json"}
     if headers:
         h.update(headers)
@@ -43,10 +58,21 @@ def http_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> t
         try:
             return e.code, json.loads(body)
         except Exception:
-            return e.code, body[:500]
+            return e.code, body[:800]
     except Exception as e:
-        return 0, str(e)
+        return 0, {"error": str(e)}
 
+
+def cord_headers(api_key: str | None) -> dict:
+    if not api_key:
+        return {}
+    # CordCat accepts X-API-Key or Authorization: Bearer
+    if api_key.lower().startswith("bearer "):
+        return {"Authorization": api_key}
+    return {"X-API-Key": api_key, "Authorization": f"Bearer {api_key}"}
+
+
+# ── snowflake / avatar ──────────────────────────────────────────────────
 
 def decode_snowflake(sf: str) -> dict:
     n = int(sf)
@@ -60,73 +86,160 @@ def decode_snowflake(sf: str) -> dict:
         "worker_id": (n & 0x3E0000) >> 17,
         "process_id": (n & 0x1F000) >> 12,
         "increment": n & 0xFFF,
+        "default_avatar_index": (n >> 22) % 6,
+        "default_avatar_url": f"https://cdn.discordapp.com/embed/avatars/{(n >> 22) % 6}.png",
     }
 
 
-def resolve_invite(code: str) -> dict:
-    # with counts for richer guild intel
-    url = f"https://discord.com/api/v10/invites/{urllib.parse.quote(code)}?with_counts=true&with_expiration=true"
-    status, data = http_json(url)
-    return {"status": status, "data": data}
+def avatar_url(user_id: str, avatar_hash: str | None) -> str | None:
+    if not avatar_hash:
+        return None
+    ext = "gif" if str(avatar_hash).startswith("a_") else "png"
+    return f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.{ext}?size=1024"
 
 
-def guild_widget(guild_id: str) -> dict:
-    url = f"https://discord.com/api/v10/guilds/{guild_id}/widget.json"
-    status, data = http_json(url)
-    return {"status": status, "data": data}
+# ── CordCat API ─────────────────────────────────────────────────────────
+
+def cord_query(discord_id: str, api_key: str | None) -> tuple[int, object]:
+    """Full lookup: profile, breach exposure, FiveM, DSA, risk/bot score."""
+    url = f"{CORD_BASE}/api/v2/query/{urllib.parse.quote(discord_id)}"
+    return http_json(url, headers=cord_headers(api_key))
 
 
-def discord_user_api(user_id: str, bot_token: str | None) -> dict:
-    """Requires bot token that shares a mutual guild OR can fetch public profile fields."""
+def cord_lookup_name(name: str, api_key: str | None) -> tuple[int, object]:
+    """Search by username / display name."""
+    url = f"{CORD_BASE}/api/v2/lookup/{urllib.parse.quote(name)}"
+    return http_json(url, headers=cord_headers(api_key))
+
+
+def cord_user_guilds(discord_id: str, api_key: str | None) -> tuple[int, object]:
+    url = f"{CORD_BASE}/api/v2/guilds/{urllib.parse.quote(discord_id)}"
+    return http_json(url, headers=cord_headers(api_key))
+
+
+def cord_server(server_id: str, api_key: str | None) -> tuple[int, object]:
+    url = f"{CORD_BASE}/api/v2/server/{urllib.parse.quote(server_id)}"
+    return http_json(url, headers=cord_headers(api_key))
+
+
+def cord_guild_lookup(guild_id: str, api_key: str | None) -> tuple[int, object]:
+    url = f"{CORD_BASE}/api/v2/lookup/guild/{urllib.parse.quote(guild_id)}"
+    return http_json(url, headers=cord_headers(api_key))
+
+
+# ── public Discord ──────────────────────────────────────────────────────
+
+def resolve_invite(code: str) -> tuple[int, object]:
+    url = (
+        f"https://discord.com/api/v10/invites/{urllib.parse.quote(code)}"
+        f"?with_counts=true&with_expiration=true"
+    )
+    return http_json(url)
+
+
+def guild_widget(guild_id: str) -> tuple[int, object]:
+    return http_json(f"https://discord.com/api/v10/guilds/{guild_id}/widget.json")
+
+
+def discord_bot_user(user_id: str, bot_token: str | None) -> tuple[int, object]:
     if not bot_token:
-        return {"status": 0, "data": "bot token not set (DISCORD_BOT_TOKEN)"}
-    url = f"https://discord.com/api/v10/users/{user_id}"
-    status, data = http_json(url, headers={"Authorization": f"Bot {bot_token}"})
-    return {"status": status, "data": data}
+        return 0, {"error": "DISCORD_BOT_TOKEN not set"}
+    return http_json(
+        f"https://discord.com/api/v10/users/{user_id}",
+        headers={"Authorization": f"Bot {bot_token}"},
+    )
 
 
-def cord_lookup(discord_id: str, api_key: str | None) -> dict:
-    url = f"https://api.cord.cat/api/v2/query/{discord_id}"
-    headers = {}
-    if api_key:
-        headers["X-API-Key"] = api_key
-    status, data = http_json(url, headers=headers)
-    return {"status": status, "data": data}
+# ── pretty printers ─────────────────────────────────────────────────────
 
-
-def osintcat_lookup(query: str, api_key: str | None) -> dict:
-    if not api_key:
-        return {"status": 0, "data": "OSINTCAT_KEY required"}
-    url = "https://www.osintcat.net/api/discord?" + urllib.parse.urlencode({"query": query})
-    status, data = http_json(url, headers={"X-API-KEY": api_key})
-    return {"status": status, "data": data}
-
-
-def avatar_urls(user_id: str, avatar_hash: str | None = None) -> dict:
-    out = {
-        "default_index": str((int(user_id) >> 22) % 6),
-        "default_png": f"https://cdn.discordapp.com/embed/avatars/{(int(user_id) >> 22) % 6}.png",
-    }
-    if avatar_hash:
-        ext = "gif" if avatar_hash.startswith("a_") else "png"
-        out["custom"] = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.{ext}?size=1024"
-    return out
-
-
-def print_section(title: str) -> None:
+def section(title: str) -> None:
     print(f"\n[+] {title}")
-    print("-" * 50)
+    print("-" * 56)
 
 
-def dump(obj: object, limit: int = 4000) -> None:
-    if isinstance(obj, (dict, list)):
-        s = json.dumps(obj, indent=2, default=str)
-    else:
-        s = str(obj)
+def kv(key: str, val: object, width: int = 16) -> None:
+    if val is None or val == "":
+        return
+    s = str(val)
+    if len(s) > 200:
+        s = s[:197] + "..."
+    print(f"  {key:<{width}} {s}")
+
+
+def dump_json(obj: object, limit: int = 5000) -> None:
+    s = json.dumps(obj, indent=2, default=str)
     if len(s) > limit:
-        s = s[:limit] + "\n... [truncated]"
+        s = s[:limit] + "\n  ... [truncated]"
     print(s)
 
+
+def print_cord_query(data: object) -> None:
+    if not isinstance(data, dict):
+        dump_json(data)
+        return
+
+    # flexible field walk — CordCat schema may nest under profile / user / data
+    user = data.get("user") or data.get("profile") or data.get("discord") or data
+    if isinstance(user, dict):
+        section("cord · profile")
+        for k in (
+            "id", "username", "global_name", "display_name", "discriminator",
+            "bio", "pronouns", "locale", "nsfw_allowed", "bot", "system",
+            "flags", "public_flags", "premium_type",
+        ):
+            kv(k, user.get(k))
+        av = user.get("avatar") or data.get("avatar")
+        uid = str(user.get("id") or data.get("id") or "")
+        if av and uid:
+            kv("avatar_url", avatar_url(uid, str(av)))
+        if user.get("banner"):
+            kv("banner", user.get("banner"))
+        if data.get("created_at") or user.get("created_at"):
+            kv("created_at", data.get("created_at") or user.get("created_at"))
+
+    # risk / bot score
+    for key in ("risk", "risk_score", "bot_score", "score", "trust"):
+        if key in data:
+            section("cord · risk")
+            dump_json(data[key], limit=1500)
+            break
+
+    # exposure / breaches
+    for key in ("exposure", "breaches", "datasets", "leaks", "breach_data"):
+        if key in data and data[key]:
+            section(f"cord · {key}")
+            dump_json(data[key], limit=3000)
+            break
+
+    # FiveM
+    for key in ("fivem", "fivem_records", "five_m"):
+        if key in data and data[key]:
+            section("cord · FiveM")
+            dump_json(data[key], limit=2000)
+            break
+
+    # DSA sanctions
+    for key in ("dsa", "sanctions", "dsa_sanctions", "eu_dsa"):
+        if key in data and data[key]:
+            section("cord · DSA / sanctions")
+            dump_json(data[key], limit=2000)
+            break
+
+    # residual keys not printed
+    known = {
+        "user", "profile", "discord", "id", "username", "avatar", "banner",
+        "risk", "risk_score", "bot_score", "score", "trust",
+        "exposure", "breaches", "datasets", "leaks", "breach_data",
+        "fivem", "fivem_records", "five_m", "dsa", "sanctions", "dsa_sanctions",
+        "eu_dsa", "created_at", "global_name", "display_name",
+    }
+    extra = {k: v for k, v in data.items() if k not in known and v not in (None, "", [], {})}
+    if extra:
+        section("cord · other fields")
+        dump_json(extra, limit=2500)
+
+
+# ── main ────────────────────────────────────────────────────────────────
 
 def run(argv: list[str]) -> None:
     p = argparse.ArgumentParser(
@@ -134,22 +247,33 @@ def run(argv: list[str]) -> None:
         description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+CordCat (https://cord.cat) is first-class. Get a key: cord.cat → Dashboard.
+
 examples:
+  export CORD_KEY=cc_...
   osintkit discord 803511102246789120
-  osintkit discord discord.gg/discord-developers
-  osintkit discord --invite abcdef
-  osintkit discord 803511102246789120 --deep
+  osintkit discord 803511102246789120 --guilds --server-deep
+  osintkit discord --name someuser
+  osintkit discord https://discord.gg/discord-developers
+  osintkit discord --guild 613425648685547541
         """,
     )
-    p.add_argument("target", nargs="?", help="snowflake id, invite URL/code, or @username hint")
+    p.add_argument("target", nargs="?", help="discord snowflake id or invite URL/code")
+    p.add_argument("--name", help="username / display name search via CordCat lookup")
     p.add_argument("--invite", help="invite code or URL")
-    p.add_argument("--guild", help="guild id for widget.json")
-    p.add_argument("--deep", action="store_true", help="hit cord.cat + osintcat if keys present")
-    p.add_argument("--bot-token", default=os.environ.get("DISCORD_BOT_TOKEN"), help="bot token for /users API")
-    p.add_argument("--cord-key", default=os.environ.get("CORD_KEY"))
+    p.add_argument("--guild", help="guild/server id (widget + cord server/guild endpoints)")
+    p.add_argument("--guilds", action="store_true", help="CordCat: list user guilds for snowflake target")
+    p.add_argument("--server-deep", action="store_true", help="CordCat: deep server stats when guild id known")
+    p.add_argument("--cord-key", default=os.environ.get("CORD_KEY") or os.environ.get("CORDCAT_KEY"))
+    p.add_argument("--bot-token", default=os.environ.get("DISCORD_BOT_TOKEN"))
     p.add_argument("--osintcat-key", default=os.environ.get("OSINTCAT_KEY"))
-    p.add_argument("--json", action="store_true")
+    p.add_argument("--no-cord", action="store_true", help="skip CordCat even if key present")
+    p.add_argument("--raw", action="store_true", help="always dump raw JSON from CordCat")
+    p.add_argument("--json", action="store_true", help="machine-readable full report")
     args = p.parse_args(argv)
+
+    cord_key = None if args.no_cord else args.cord_key
+    report: dict = {"tool": "osintkit-discord", "cord": bool(cord_key)}
 
     target = (args.target or "").strip()
     invite = args.invite
@@ -158,108 +282,150 @@ examples:
         if m:
             invite = m.group(1)
             target = ""
-        elif re.fullmatch(r"[A-Za-z0-9-]{2,32}", target) and not SNOWFLAKE_RE.match(target):
-            # bare invite code heuristic
-            if "discord" not in target.lower():
-                pass
 
-    report: dict = {"tool": "osintkit-discord", "target": args.target}
-
-    # --- invite path ---
-    if invite:
-        m = INVITE_RE.search(invite)
-        code = m.group(1) if m else invite.strip().rstrip("/")
-        print_section(f"invite  {code}")
-        inv = resolve_invite(code)
-        report["invite"] = inv
-        if args.json:
-            pass
-        elif inv["status"] == 200 and isinstance(inv["data"], dict):
-            d = inv["data"]
-            g = d.get("guild") or {}
-            print(f"  invite     {code}")
-            print(f"  guild      {g.get('name')}  ({g.get('id')})")
-            print(f"  desc       {(g.get('description') or '-')[:120]}")
-            print(f"  members    {d.get('approximate_member_count')}")
-            print(f"  online     {d.get('approximate_presence_count')}")
-            print(f"  features   {', '.join((g.get('features') or [])[:12])}")
-            print(f"  vanity     {g.get('vanity_url_code') or '-'}")
-            print(f"  channel    {(d.get('channel') or {}).get('name')} ({(d.get('channel') or {}).get('id')})")
-            print(f"  inviter    {(d.get('inviter') or {}).get('username')} ({(d.get('inviter') or {}).get('id')})")
-            if g.get("id"):
-                if SNOWFLAKE_RE.match(str(g["id"])):
-                    print(f"  guild_created  {decode_snowflake(str(g['id']))['created_utc']}")
-                print_section("guild widget")
-                w = guild_widget(str(g["id"]))
-                report["widget"] = w
-                if w["status"] == 200 and isinstance(w["data"], dict):
-                    print(f"  widget_enabled  yes")
-                    print(f"  name            {w['data'].get('name')}")
-                    print(f"  presence        {len(w['data'].get('members') or [])} listed samples")
-                    for mem in (w["data"].get("members") or [])[:8]:
-                        print(f"    - {mem.get('username')}  status={mem.get('status')}")
-                else:
-                    print(f"  widget  disabled/unavailable ({w['status']})")
+    # ── name search via CordCat ─────────────────────────────────────────
+    if args.name:
+        section(f"cord · lookup name  {args.name}")
+        if not cord_key:
+            print("  need CORD_KEY for /api/v2/lookup/:name")
+            print("  get one: https://cord.cat → Dashboard")
         else:
-            print(f"  failed  status={inv['status']}  {inv['data']!r}"[:200])
+            st, data = cord_lookup_name(args.name, cord_key)
+            report["cord_lookup"] = {"status": st, "data": data}
+            print(f"  status  {st}")
+            if st == 200:
+                print_cord_query(data) if not args.raw else dump_json(data)
+            else:
+                dump_json(data, limit=1500)
 
-    # --- snowflake / user path ---
+    # ── invite ──────────────────────────────────────────────────────────
+    guild_id_from_invite = None
+    if invite:
+        m = INVITE_RE.search(invite) if "discord" in invite else None
+        code = m.group(1) if m else invite.strip().strip("/")
+        section(f"invite  {code}")
+        st, data = resolve_invite(code)
+        report["invite"] = {"status": st, "data": data}
+        if st == 200 and isinstance(data, dict):
+            g = data.get("guild") or {}
+            guild_id_from_invite = str(g.get("id") or "") or None
+            kv("guild", f"{g.get('name')} ({g.get('id')})")
+            kv("description", (g.get("description") or "")[:140])
+            kv("members", data.get("approximate_member_count"))
+            kv("online", data.get("approximate_presence_count"))
+            kv("features", ", ".join((g.get("features") or [])[:14]))
+            kv("vanity", g.get("vanity_url_code"))
+            ch = data.get("channel") or {}
+            kv("channel", f"{ch.get('name')} ({ch.get('id')})")
+            inv = data.get("inviter") or {}
+            if inv:
+                kv("inviter", f"{inv.get('username')} ({inv.get('id')})")
+            if guild_id_from_invite and SNOWFLAKE_RE.match(guild_id_from_invite):
+                kv("guild_created", decode_snowflake(guild_id_from_invite)["created_utc"])
+        else:
+            print(f"  status {st}")
+            dump_json(data, limit=800)
+
+    # ── snowflake target ────────────────────────────────────────────────
     sf = target if target and SNOWFLAKE_RE.match(target) else None
     if sf:
-        print_section(f"snowflake  {sf}")
+        section(f"snowflake  {sf}")
         meta = decode_snowflake(sf)
         report["snowflake"] = meta
         for k, v in meta.items():
-            print(f"  {k:14} {v}")
-        av = avatar_urls(sf)
-        print(f"  default_avatar {av['default_png']}")
+            kv(k, v)
 
-        print_section("discord API user")
-        u = discord_user_api(sf, args.bot_token)
-        report["discord_api_user"] = u
-        if u["status"] == 200 and isinstance(u["data"], dict):
-            d = u["data"]
-            for k in ("id", "username", "global_name", "discriminator", "bot", "system", "flags", "public_flags"):
-                if k in d:
-                    print(f"  {k:14} {d.get(k)}")
-            if d.get("avatar"):
-                print(f"  avatar_url    {avatar_urls(sf, d['avatar']).get('custom')}")
-            if d.get("banner"):
-                print(f"  banner        {d.get('banner')}")
-            if d.get("accent_color") is not None:
-                print(f"  accent        #{d['accent_color']:06x}" if isinstance(d["accent_color"], int) else d["accent_color"])
+        # CordCat FULL QUERY — main event
+        section("cord.cat · full query")
+        if not cord_key:
+            print("  CORD_KEY not set — only public decode available")
+            print("  export CORD_KEY=cc_...   # https://cord.cat dashboard")
+            print("  CordCat returns: profile · breach exposure · FiveM · DSA · risk score")
         else:
-            print(f"  status {u['status']}  — set DISCORD_BOT_TOKEN for profile fetch")
-            print(f"  note: bot must share a mutual server with the user for full profile")
+            st, data = cord_query(sf, cord_key)
+            report["cord_query"] = {"status": st, "data": data}
+            print(f"  HTTP {st}")
+            if st == 200:
+                if args.raw or args.json:
+                    dump_json(data, limit=12000)
+                else:
+                    print_cord_query(data)
+            elif st == 401:
+                print("  unauthorized — check CORD_KEY")
+                dump_json(data, limit=500)
+            elif st == 429:
+                print("  rate limited — wait and retry")
+            else:
+                dump_json(data, limit=1000)
 
-        if args.deep or args.cord_key or args.osintcat_key:
-            print_section("cord.cat")
-            c = cord_lookup(sf, args.cord_key)
-            report["cord"] = c
-            dump(c["data"] if c["status"] == 200 else c, limit=3500)
+        # optional guild list for user
+        if args.guilds:
+            section("cord · user guilds")
+            if not cord_key:
+                print("  CORD_KEY required")
+            else:
+                st, data = cord_user_guilds(sf, cord_key)
+                report["cord_guilds"] = {"status": st, "data": data}
+                print(f"  HTTP {st}")
+                dump_json(data, limit=4000)
 
-            print_section("osintcat")
-            o = osintcat_lookup(sf, args.osintcat_key)
-            report["osintcat"] = o
-            dump(o["data"] if o["status"] == 200 else o, limit=3500)
+        # Discord bot API supplement
+        section("discord API · user")
+        st, data = discord_bot_user(sf, args.bot_token)
+        report["discord_api"] = {"status": st, "data": data}
+        if st == 200 and isinstance(data, dict):
+            for k in ("id", "username", "global_name", "discriminator", "bot", "flags", "public_flags"):
+                kv(k, data.get(k))
+            if data.get("avatar"):
+                kv("avatar_url", avatar_url(sf, data["avatar"]))
+        else:
+            print(f"  status {st} — set DISCORD_BOT_TOKEN for live profile")
 
-    if not sf and not invite and target:
-        print_section("query")
-        print(f"  raw target: {target}")
-        print("  tip: pass a numeric snowflake (17-20 digits) or invite URL/code")
-        if args.deep or args.osintcat_key:
-            print_section("osintcat (raw query)")
-            o = osintcat_lookup(target, args.osintcat_key)
-            report["osintcat"] = o
-            dump(o["data"] if o["status"] == 200 else o, limit=3500)
+        # osintcat optional second source
+        if args.osintcat_key:
+            section("osintcat · discord")
+            url = "https://www.osintcat.net/api/discord?" + urllib.parse.urlencode({"query": sf})
+            st, data = http_json(url, headers={"X-API-KEY": args.osintcat_key})
+            report["osintcat"] = {"status": st, "data": data}
+            print(f"  HTTP {st}")
+            dump_json(data, limit=3000)
 
-    if args.guild:
-        print_section(f"guild widget  {args.guild}")
-        w = guild_widget(args.guild.strip())
-        report["widget"] = w
-        dump(w["data"] if w["status"] == 200 else w)
+    # ── guild focus ─────────────────────────────────────────────────────
+    guild_id = (args.guild or guild_id_from_invite or "").strip() or None
+    if guild_id:
+        section(f"guild widget  {guild_id}")
+        st, data = guild_widget(guild_id)
+        report["widget"] = {"status": st, "data": data}
+        if st == 200 and isinstance(data, dict):
+            kv("name", data.get("name"))
+            kv("presence_samples", len(data.get("members") or []))
+            for mem in (data.get("members") or [])[:10]:
+                print(f"    - {mem.get('username')}  [{mem.get('status')}]")
+        else:
+            print(f"  widget unavailable ({st})")
+
+        if cord_key:
+            section("cord · server")
+            st, data = cord_server(guild_id, cord_key)
+            report["cord_server"] = {"status": st, "data": data}
+            print(f"  HTTP {st}")
+            dump_json(data, limit=3000)
+
+            section("cord · lookup guild")
+            st, data = cord_guild_lookup(guild_id, cord_key)
+            report["cord_guild_lookup"] = {"status": st, "data": data}
+            print(f"  HTTP {st}")
+            dump_json(data, limit=3000)
+        elif args.server_deep:
+            print("  --server-deep needs CORD_KEY")
+
+    if not any([sf, invite, args.name, guild_id]):
+        section("usage")
+        print("  pass a snowflake, invite URL, --name, or --guild")
+        print("  CordCat key: export CORD_KEY=cc_...  (https://cord.cat)")
 
     if args.json:
-        print(json.dumps(report, indent=2, default=str))
+        print("\n===JSON===")
+        print(json.dumps(report, indent=2, default=str)[:50000])
 
     print("\n[*] done")

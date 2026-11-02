@@ -90,3 +90,51 @@ python3 osintkit.py discord 803511102246789120 --deep
 Without keys you still get: snowflake creation time, invite/guild public metadata, widget presence samples, and CDN avatar URLs.
 With a bot token: username, global name, avatar, flags (if the bot can resolve the user).
 With cord/osintcat keys: aggregated breach / exposure records those services provide.
+
+
+## CordCat (cord.cat) — how to go deep on Discord
+
+CordCat is **first-class** in `osintkit discord`.
+
+1. Create account at https://cord.cat  
+2. Dashboard → API key (`cc_...`)  
+3. Export it:
+
+```bash
+export CORD_KEY=cc_your_key_here
+```
+
+### What CordCat endpoints we hit
+
+| endpoint | purpose |
+|----------|---------|
+| `GET /api/v2/query/:id` | full profile, breach exposure, FiveM, EU DSA, risk/bot score |
+| `GET /api/v2/lookup/:name` | search by username / display name |
+| `GET /api/v2/guilds/:id` | user's server list (tier gated) |
+| `GET /api/v2/server/:id` | server deep stats / history |
+| `GET /api/v2/lookup/guild/:id` | guild member profile view |
+
+### Commands
+
+```bash
+# full ID intel (needs CORD_KEY for breach/FiveM/DSA layers)
+python3 osintkit.py discord 803511102246789120
+
+# username search
+python3 osintkit.py discord --name someuser
+
+# user + guild list
+python3 osintkit.py discord 803511102246789120 --guilds
+
+# invite → guild, then CordCat server endpoints
+python3 osintkit.py discord https://discord.gg/CODE --server-deep
+
+# raw JSON from CordCat
+python3 osintkit.py discord 803511102246789120 --raw
+
+# full machine report
+python3 osintkit.py discord 803511102246789120 --json
+```
+
+Without a key you still get accurate snowflake timestamps, invite metadata, and widget samples.  
+With a key you unlock CordCat's aggregated OSINT (plan limits apply — free/premium/contributor).
