@@ -247,7 +247,9 @@ def run(argv: list[str]) -> None:
         description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-CordCat (https://cord.cat) is first-class. Get a key: cord.cat → Dashboard.
+CordCat (https://cord.cat) is first-class.
+Get a key: cord.cat → Sign up → Dashboard → API key (cc_...)
+Then: export CORD_KEY=cc_...   or   --cord-key cc_...
 
 examples:
   export CORD_KEY=cc_...

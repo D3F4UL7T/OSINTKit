@@ -96,13 +96,46 @@ With cord/osintcat keys: aggregated breach / exposure records those services pro
 
 CordCat is **first-class** in `osintkit discord`.
 
-1. Create account at https://cord.cat  
-2. Dashboard → API key (`cc_...`)  
-3. Export it:
+### How to get a CordCat API key
+
+1. Open **[https://cord.cat](https://cord.cat)** in a browser.
+2. Click **Sign up / Log in** and create a CordCat account  
+   (this is *not* your Discord password — CordCat account only).
+3. After login, open the **Dashboard**.
+4. Find **API key** / **Developer** section.
+5. **Create** or **Reveal** your key. It usually looks like `cc_...`.
+6. Copy the key once — store it somewhere safe. Do **not** commit it to git.
+
+#### Put the key in your shell
 
 ```bash
-export CORD_KEY=cc_your_key_here
+# current session only
+export CORD_KEY=cc_paste_your_key_here
+
+# optional: persist for your user shell
+echo 'export CORD_KEY=cc_paste_your_key_here' >> ~/.bashrc
+source ~/.bashrc
 ```
+
+#### Or pass it per command
+
+```bash
+python3 osintkit.py discord 803511102246789120 --cord-key cc_paste_your_key_here
+```
+
+#### Or use a local secrets file (never commit)
+
+```bash
+echo 'CORD_KEY=cc_paste_your_key_here' > .env
+# then: export $(grep -v '^#' .env | xargs)
+```
+
+### Plans / limits (CordCat)
+
+CordCat enforces its own quotas (free / premium / contributor).  
+If you get `401` → bad/missing key. `429` → rate limit — wait and retry.  
+Details: [https://cord.cat/docs](https://cord.cat/docs)
+
 
 ### What CordCat endpoints we hit
 

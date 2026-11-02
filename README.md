@@ -79,6 +79,40 @@ OSINTKit/
 
 See [docs/FAQ.md](docs/FAQ.md).
 
+
+## Keys (Discord / CordCat)
+
+Deep Discord intel uses **[CordCat](https://cord.cat)**.
+
+### Get a CordCat key
+
+1. Go to [https://cord.cat](https://cord.cat) → **Sign up / Log in**
+2. Open **Dashboard** → **API key** (starts with `cc_`)
+3. Copy the key — do not publish it
+
+```bash
+export CORD_KEY=cc_your_key_here
+python3 osintkit.py discord 803511102246789120
+```
+
+Per-run:
+
+```bash
+python3 osintkit.py discord 803511102246789120 --cord-key cc_your_key_here
+```
+
+Docs: [cord.cat/docs](https://cord.cat/docs) · FAQ: [docs/FAQ.md](docs/FAQ.md)
+
+Other optional keys:
+
+| env | purpose |
+|-----|---------|
+| `CORD_KEY` | CordCat Discord OSINT (recommended) |
+| `DISCORD_BOT_TOKEN` | live `/users` profile via your bot |
+| `OSINTCAT_KEY` | secondary leak index |
+| `GITHUB_TOKEN` | higher GitHub API rate limit |
+
+
 ## Notes
 
 Lab and authorized research only. Respect platform ToS and local law. Author assumes no liability for misuse.
