@@ -1,0 +1,5 @@
+# core works with stdlib only
+# optional accuracy upgrades:
+dnspython>=2.4.0
+phonenumbers>=8.13.0
+Pillow>=10.0.0
